@@ -1,5 +1,7 @@
 package com.kundokoli.service;
 
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import com.kundokoli.model.Product;
 import com.kundokoli.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
@@ -7,7 +9,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
-import java.nio.file.*;
 import java.util.*;
 
 @Service
@@ -16,8 +17,22 @@ public class ProductService {
 
     private final ProductRepository productRepository;
 
-    @Value("${file.upload-dir}")
-    private String uploadDir;
+    @Value("${CLOUDINARY_CLOUD_NAME}")
+    private String cloudName;
+
+    @Value("${CLOUDINARY_API_KEY}")
+    private String apiKey;
+
+    @Value("${CLOUDINARY_API_SECRET}")
+    private String apiSecret;
+
+    private Cloudinary getCloudinary() {
+        return new Cloudinary(ObjectUtils.asMap(
+                "cloud_name", cloudName,
+                "api_key", apiKey,
+                "api_secret", apiSecret
+        ));
+    }
 
     public List<Product> getAllProducts() {
         return productRepository.findAll();
@@ -37,7 +52,7 @@ public class ProductService {
 
     public Product createProduct(Product product, MultipartFile image) throws IOException {
         if (image != null && !image.isEmpty()) {
-            String imageUrl = saveImage(image);
+            String imageUrl = uploadToCloudinary(image);
             product.setImageUrl(imageUrl);
         }
         return productRepository.save(product);
@@ -54,11 +69,11 @@ public class ProductService {
         existing.setStockQuantity(updated.getStockQuantity());
 
         if (image != null && !image.isEmpty()) {
-            // Delete old image
+            // Delete old image from Cloudinary
             if (existing.getImageUrl() != null) {
-                deleteImage(existing.getImageUrl());
+                deleteFromCloudinary(existing.getImageUrl());
             }
-            existing.setImageUrl(saveImage(image));
+            existing.setImageUrl(uploadToCloudinary(image));
         }
         return productRepository.save(existing);
     }
@@ -67,25 +82,32 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
         if (product.getImageUrl() != null) {
-            deleteImage(product.getImageUrl());
+            deleteFromCloudinary(product.getImageUrl());
         }
         productRepository.deleteById(id);
     }
 
-    private String saveImage(MultipartFile file) throws IOException {
-        Path uploadPath = Paths.get(uploadDir);
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
-        String filename = UUID.randomUUID() + "_" + file.getOriginalFilename();
-        Path filePath = uploadPath.resolve(filename);
-        Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
-        return "/uploads/" + filename;
+    private String uploadToCloudinary(MultipartFile file) throws IOException {
+        Map uploadResult = getCloudinary().uploader().upload(
+                file.getBytes(),
+                ObjectUtils.asMap("folder", "kundokoli")
+        );
+        return (String) uploadResult.get("secure_url");
     }
 
-    private void deleteImage(String imageUrl) throws IOException {
-        String filename = imageUrl.replace("/uploads/", "");
-        Path filePath = Paths.get(uploadDir).resolve(filename);
-        Files.deleteIfExists(filePath);
+    private void deleteFromCloudinary(String imageUrl) {
+        try {
+            String publicId = extractPublicId(imageUrl);
+            getCloudinary().uploader().destroy(publicId, ObjectUtils.emptyMap());
+        } catch (Exception e) {
+            System.out.println("Could not delete image: " + e.getMessage());
+        }
+    }
+
+    private String extractPublicId(String imageUrl) {
+        // Extract public_id from Cloudinary URL
+        String[] parts = imageUrl.split("/");
+        String filename = parts[parts.length - 1];
+        return "kundokoli/" + filename.split("\\.")[0];
     }
 }
