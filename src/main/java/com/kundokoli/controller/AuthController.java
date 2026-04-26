@@ -52,9 +52,12 @@ public class AuthController {
         };
     }
 
+
     @Data
     public static class LoginRequest {
         private String username;
         private String password;
     }
 }
+
+
