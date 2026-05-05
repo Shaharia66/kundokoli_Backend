@@ -118,8 +118,11 @@ public class SecurityConfig {
                         .password(user.getPassword())
                         .authorities(user.getRole())
                         .build())
+
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
     }
+
+
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
